@@ -10,13 +10,16 @@
 
 namespace Acquia\CommerceManager\Model\Indexer;
 
+use Magento\CatalogUrlRewrite\Model\ResourceModel\Category\ProductCollection;
 use Magento\Framework\App\ResourceConnection;
 use Magento\Catalog\Model\Product\Attribute\Source\Status;
 use Magento\Catalog\Model\ResourceModel\Product\CollectionFactory as ProductCollectionFactory;
 use Magento\Rule\Model\Condition\Combine as CombineCondition;
+use Magento\SalesRule\Model\Rule as SalesRule;
 use Magento\SalesRule\Model\Rule\Condition\Product as ProductCondition;
 use Magento\SalesRule\Model\ResourceModel\Rule\Collection as RuleCollection;
 use Magento\SalesRule\Model\ResourceModel\Rule\CollectionFactory as RuleCollectionFactory;
+use Magento\Store\Model\StoreManagerInterface;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -26,12 +29,6 @@ use Psr\Log\LoggerInterface;
  */
 class SalesRuleBuilder
 {
-    /**
-     * Sales Rule / Product Discount Applier
-     * @var SalesRuleApplier $applier
-     */
-    protected $applier;
-
     /**
      * Database Transaction Batch Size
      * @var int $batchSize
@@ -69,16 +66,27 @@ class SalesRuleBuilder
     protected $logger;
 
     /**
-     * Constructor
+     * Array to keep a check on processed products and avoid duplicates entries.
      *
+     * @var array
+     */
+    protected $duplicatesCheck = [];
+
+    /**
+     * SalesRuleBuilder constructor.
+     *
+     * @param ProductCollectionFactory $productCollection
+     * @param RuleCollectionFactory    $ruleCollection
+     * @param ResourceConnection       $resource
+     * @param StoreManagerInterface    $storeManager
      * @param LoggerInterface $logger
-     * @return void
+     * @param int                      $batchSize
      */
     public function __construct(
         ProductCollectionFactory $productCollection,
         RuleCollectionFactory $ruleCollection,
         ResourceConnection $resource,
-        SalesRuleApplier $applier,
+        StoreManagerInterface $storeManager,
         LoggerInterface $logger,
         $batchSize = 1000
     ) {
@@ -86,7 +94,7 @@ class SalesRuleBuilder
         $this->ruleCollection = $ruleCollection;
         $this->resource = $resource;
         $this->connection = $resource->getConnection();
-        $this->applier = $applier;
+        $this->storeManager = $storeManager;
         $this->logger = $logger;
         $this->batchSize = $batchSize;
     }
@@ -189,53 +197,103 @@ class SalesRuleBuilder
             };
         }
 
-        $rows = [];
-
+        /** @var SalesRule $rule */
         foreach ($rules as $rule) {
-            // Assemble matching products collection to rule conditions
-            $products = $buildProducts();
-            $conditions = $this->locateProductConditions($rule->getConditions());
+            // We index only for those without coupons.
+            if ($rule->getCouponType() != SalesRule::COUPON_TYPE_NO_COUPON) {
+                continue;
+            }
 
-            foreach ($conditions as $prodCond) {
-                $attribute = $prodCond->getAttribute();
-                $option = $prodCond->getOperatorForValidate();
-                $value = $prodCond->getValueParsed();
+            $products_processed = FALSE;
 
-                $comparisons = [
-                    '==' => 'eq',
-                    '!=' => 'neq',
-                    '>' => 'gt',
-                    '>=' => 'gteq',
-                    '<' => 'lt',
-                    '<=' => 'lteq',
-                    '()' => 'in',
-                    '!()' => 'nin',
-                    '{}' => 'in',
-                    '!{}' => 'nin',
-                ];
+            $conditions = $this->locateProductConditions(
+                $rule->getConditions()->getConditions()
+            );
 
-                if (isset($comparisons[$option])) {
-                    $compare = $comparisons[$option];
-                } else {
-                    continue 2;
-                }
-
-                if ($attribute == 'category_ids') {
-                    $products->addCategoriesFilter([$compare => $value]);
-                } else {
-                    $products->addAttributeToFilter($attribute, [$compare => $value]);
+            try {
+                if (!empty($conditions)) {
+                    // Assemble matching products collection to rule conditions
+                    $products = $buildProducts();
+                    $this->filterProducts($products, $conditions);
+                    $this->addProductsToIndex($products, $rule);
+                    $products_processed = TRUE;
                 }
             }
+            catch (\RuntimeException $e) {
+                continue;
+            }
+
+            $actionConditions = $this->locateProductConditions(
+                $rule->getActions()->getConditions()
+            );
+
+            try {
+                if (!empty($actionConditions)) {
+                    // Assemble matching products collection to rule conditions
+                    $actionProducts = $buildProducts();
+                    $this->filterProducts($actionProducts, $actionConditions);
+                    $this->addProductsToIndex($actionProducts, $rule);
+                    $products_processed = TRUE;
+                }
+            }
+            catch (\RuntimeException $e) {
+                continue;
+            }
+
+            if (!$products_processed) {
+                $this->logger->warning('No products conditions available for rule. Labels wont be displayed', [
+                    $rule->getId(),
+                ]);
+            }
+        }
+    }
+
+    /**
+     * addProductsToIndex.
+     *
+     * Helper function to add filtered products to index.
+     *
+     * @param $products
+     * @param SalesRule $rule
+     */
+    protected function addProductsToIndex($products, SalesRule $rule) {
+        $rows = [];
+
+        $ruleWebsiteIds = $rule->getWebsiteIds();
 
             // Iterate matched products and calculate discounts
             foreach ($products as $product) {
                 foreach ($product->getWebsiteIds() as $storeId) {
-                    $discount = $this->applier->getDiscountData($product, $rule, $storeId);
-                    if ($discount) {
+                // Check product store id against store ids allowed in rule.
+                if (!in_array($storeId, $ruleWebsiteIds)) {
+                    continue;
+                }
+
+                // Check if store id exists. This is to ensure we don't face
+                // issues because of corrupt data.
+                try {
+                    $this->storeManager->getStore($storeId);
+                }
+                catch (\Exception $e) {
+                    $this->logger->warning('Junk store found in product.', [
+                        $product->getId(),
+                        $storeId,
+                    ]);
+
+                    continue;
+                }
+
+                if (isset($this->duplicatesCheck[$rule->getId()][$storeId][$product->getId()])) {
+                    continue;
+                }
+
+                $this->duplicatesCheck[$rule->getId()][$storeId][$product->getId()] = 1;
+
                         $rows[] = [
                             'rule_id' => $rule->getId(),
                             'product_id' => $product->getId(),
-                            'rule_price' => $discount->getAmount(),
+                    // We don't use rule price for cart rules.
+                    'rule_price' => 1,
                             'website_id' => $storeId,
                         ];
 
@@ -249,8 +307,6 @@ class SalesRuleBuilder
                         }
                     }
                 }
-            }
-        }
 
         if (!empty($rows)) {
             $this->connection->insertMultiple(
@@ -261,24 +317,68 @@ class SalesRuleBuilder
     }
 
     /**
+     * filterProducts.
+     *
+     * Filter product collection based on Product Conditions.
+     *
+     * @param $products
+     * @param ProductCondition[] $conditions
+     */
+    protected function filterProducts($products, $conditions)
+    {
+        foreach ($conditions as $prodCond) {
+            $attribute = $prodCond->getAttribute();
+            $option = $prodCond->getOperatorForValidate();
+            $value = $prodCond->getValueParsed();
+
+            $comparisons = [
+                '=='  => 'eq',
+                '!='  => 'neq',
+                '>'   => 'gt',
+                '>='  => 'gteq',
+                '<'   => 'lt',
+                '<='  => 'lteq',
+                '()'  => 'in',
+                '!()' => 'nin',
+                '{}'  => 'in',
+                '!{}' => 'nin',
+            ];
+
+            if (isset($comparisons[$option])) {
+                $compare = $comparisons[$option];
+            } else {
+                throw new \RuntimeException();
+            }
+
+            if ($attribute == 'category_ids') {
+                $products->addCategoriesFilter([$compare => $value]);
+            } else {
+                $products->addAttributeToFilter(
+                    $attribute, [$compare => $value]
+                );
+            }
+        }
+    }
+
+    /**
      * locateProductConditions
      *
      * Traverse rule collection combinations and locate product specific
      * conditions to filter the product collection.
      *
-     * @param CombineCondition $combine Rule Conditions
+     * @param array $combine Rule/Action Conditions
      *
      * @return ProductCondition[] $prodCond
      */
-    protected function locateProductConditions(CombineCondition $combine)
+    protected function locateProductConditions($conditions)
     {
         $prodCond = [];
 
-        foreach ($combine->getConditions() as $cid => $condition) {
+        foreach ($conditions as $cid => $condition) {
             if ($condition instanceof CombineCondition) {
                 $prodCond = array_merge(
                     $prodCond,
-                    $this->locateProductConditions($condition)
+                    $this->locateProductConditions($condition->getConditions())
                 );
             } elseif ($condition instanceof ProductCondition) {
                 $prodCond[] = $condition;
@@ -354,7 +454,7 @@ class SalesRuleBuilder
      * Build a collection of enabled simple products to compare to
      * available rule conditions.
      *
-     * @return \Magento\Catalog\Model\ResourceModel\Product\Collection $products
+     * @return ProductCollection $products
      */
     protected function getProductCollection()
     {

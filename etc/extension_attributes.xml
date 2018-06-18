@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+
+<!--
+/**
+ * Acquia/CommerceManager/etc/extension_attributes.xml
+ *
+ * Acquia Commerce Manager Integration Custom Extension Attributes
+ *
+ * All rights reserved. No unauthorized distribution or reproduction.
+ */
+-->
+
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:framework:Api/etc/extension_attributes.xsd">
+    <extension_attributes for="Magento\Catalog\Api\Data\CategoryInterface">
+        <attribute code="swatch_display" type="string"/>
+    </extension_attributes>
+</config>

@@ -38,6 +38,17 @@ class StoreTree extends Tree
     protected $extTreeFactory;
 
     /**
+     * Store id.
+     * @var int|string|null $storeId
+     */
+    protected $storeId = NULL;
+
+    /**
+     * @var \Magento\Catalog\Api\Data\CategoryExtensionFactory $categoryExtensionFactory
+     */
+    protected $categoryExtensionFactory;
+
+    /**
      * Constructor
      *
      * @param TreeResource $categoryTree
@@ -46,6 +57,7 @@ class StoreTree extends Tree
      * @param CategoryTreeInterfaceFactory $treeFactory
      * @param Factory $categoryCollectionFactory
      * @param ExtendedTreeFactory $extTreeFactory
+     * @param \Magento\Catalog\Api\Data\CategoryExtensionFactory $categoryExtensionFactory
      */
     public function __construct(
         TreeResource $categoryTree,
@@ -53,10 +65,12 @@ class StoreTree extends Tree
         Collection $categoryCollection,
         CategoryTreeInterfaceFactory $treeFactory,
         Factory $categoryCollectionFactory,
-        ExtendedTreeFactory $extTreeFactory
+        ExtendedTreeFactory $extTreeFactory,
+        \Magento\Catalog\Api\Data\CategoryExtensionFactory $categoryExtensionFactory
     ) {
         $this->categoryCollectionFactory = $categoryCollectionFactory;
         $this->extTreeFactory = $extTreeFactory;
+        $this->categoryExtensionFactory = $categoryExtensionFactory;
 
         return (parent::__construct(
             $categoryTree,
@@ -85,6 +99,8 @@ class StoreTree extends Tree
         /** @var \Acquia\CommerceManager\Api\Data\ExtendedCategoryTreeInterface[] $children */
         $children = $this->getChildren($node, $depth, $currentLevel);
 
+        $store_id = $this->storeId ?: $node->getStoreId();
+
         /** @var \Acquia\CommerceManager\Api\Data\ExtendedCategoryTreeInterface $tree */
         $tree = $this->extTreeFactory->create();
         $tree->setId($node->getId())
@@ -94,10 +110,18 @@ class StoreTree extends Tree
             ->setLevel($node->getLevel())
             ->setIsActive($node->getIsActive())
             ->setProductCount($node->getProductCount())
-            ->setStoreId($node->getStoreId())
+            ->setStoreId($store_id)
             ->setDescription($node->getDescription())
             ->setIncludeInMenu($node->getIncludeInMenu())
             ->setChildrenData($children);
+
+        $extensionAttributes = $tree->getExtensionAttributes();
+        if ($extensionAttributes === null) {
+             $extensionAttributes = $this->categoryExtensionFactory->create();
+        }
+        $extensionAttributes->setSwatchDisplay($node->getSwatchDisplay());
+        $tree->setExtensionAttributes($extensionAttributes);
+
         return $tree;
     }
 
@@ -161,5 +185,17 @@ class StoreTree extends Tree
             ->setLoadProductCount(true)
             ->setProductStoreId($storeId)
             ->setStoreId($storeId);
+    }
+
+    /**
+     * Set store id
+     *
+     * @param int|string $storeId
+     * @return $this
+     */
+    public function setStoreId($storeId)
+    {
+      $this->storeId = $storeId;
+      return $this;
     }
 }

@@ -39,4 +39,24 @@ interface ExtendedSalesRuleInterface extends RuleInterface
      * @return self $this
      */
     public function setProductDiscounts(array $discounts);
+
+    /**
+     * getCouponCode
+     *
+     * Get coupon code for the rule.
+     *
+     * @return String $coupon_code
+     */
+    public function getCouponCode();
+
+    /**
+     * setCouponCode
+     *
+     * Set the coupon code for this rule.
+     *
+     * @param String $coupon_code
+     *
+     * @return self $this
+     */
+    public function setCouponCode(String $coupon_code);
 }

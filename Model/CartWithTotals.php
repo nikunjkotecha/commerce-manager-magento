@@ -44,6 +44,7 @@ class CartWithTotals implements CartWithTotalsInterface
      *
      * @param CartInterface $quote
      * @param TotalsInterface|null $totals
+     * @param array $responseMessage
      */
     public function __construct(
         CartInterface $quote,
@@ -56,11 +57,7 @@ class CartWithTotals implements CartWithTotalsInterface
     }
 
     /**
-     * getCart
-     *
-     * Get the Cart / Quote object updated / loaded.
-     *
-     * @return \Magento\Quote\Api\Data\CartInterface
+     * {@inheritdoc}
      */
     public function getCart()
     {
@@ -68,11 +65,7 @@ class CartWithTotals implements CartWithTotalsInterface
     }
 
     /**
-     * getTotals
-     *
-     * Get the calculated cart totals.
-     *
-     * @return \Magento\Quote\Api\Data\TotalsInterface
+     * {@inheritdoc}
      */
     public function getTotals()
     {
@@ -80,11 +73,7 @@ class CartWithTotals implements CartWithTotalsInterface
     }
 
     /**
-     * getResponseMessage
-     *
-     * Get the response message info.
-     *
-     * @return array
+     * {@inheritdoc}
      */
     public function getResponseMessage()
     {

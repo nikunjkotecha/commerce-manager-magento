@@ -22,6 +22,7 @@
                 <product_push_batch_size>5</product_push_batch_size>
                 <filter_root_category>false</filter_root_category>
                 <push_stock>false</push_stock>
+                <push_stock_non_delta>false</push_stock_non_delta>
                 <push_on_attribute_update>false</push_on_attribute_update>
             </acquia_commerce_settings>
             <acquia_commerce_security>

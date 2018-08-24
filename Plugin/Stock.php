@@ -158,6 +158,12 @@ class Stock
      * @param $stockId
      */
     public function aroundApplyIndexTableToStockTable(StockUpdateIdx $idx, callable $original, $stockId) {
+        // Don't do anything if we are not pushing non-delta stock changes.
+        if (!($this->stockHelper->pushNonDeltaChanges())) {
+            $original($stockId);
+            return;
+        }
+
         $this->logger->info('Inside afterApplyIndexTableToStockTable', ['stock_id' => $stockId]);
 
         // Load all products data with stock.

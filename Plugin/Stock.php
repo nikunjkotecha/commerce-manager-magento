@@ -172,7 +172,7 @@ class Stock
             ['product_id', 'qty']
         );
 
-        $select->where('stock_id IN (?)', $stockId);
+        $select->where('stock_id = ?', $stockId);
 
         $productsExisting = $this->connection->fetchAll($select);
 
@@ -190,7 +190,7 @@ class Stock
             ['product_id', 'website_id', 'qty']
         );
 
-        $select->where('stock_id IN (?)', $stockId);
+        $select->where('stock_id = ?', $stockId);
 
         $products = $this->connection->fetchAll($select);
 

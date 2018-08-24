@@ -96,7 +96,7 @@ class Stock
         $websiteIds
     ) {
         // Don't do anything if we are not pushing stock changes.
-        if ($this->stockHelper->getStockMode() !== 'push') {
+        if (!($this->stockHelper->pushDeltaChanges())) {
             return [$batch, $websiteIds];
         }
 
@@ -169,7 +169,7 @@ class Stock
         // Load all products data with stock.
         $select = $this->connection->select()->from(
             $this->resource->getTableName('cataloginventory_stock_item'),
-            ['product_id', 'website_id', 'qty']
+            ['product_id', 'qty']
         );
 
         $select->where('stock_id IN (?)', $stockId);

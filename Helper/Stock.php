@@ -263,17 +263,33 @@ class Stock extends AbstractHelper
     /**
      * Get stock mode (pull / push).
      *
-     * @return mixed
+     * @return bool
+     *   TRUE if delta changes are to be pushed.
      */
-    public function getStockMode() {
+    public function pushDeltaChanges()
+    {
         $path = 'webapi/acquia_commerce_settings/push_stock';
 
-        $stockMode = $this->scopeConfig->getValue(
+        return (bool) $this->scopeConfig->getValue(
             $path,
             ScopeConfigInterface::SCOPE_TYPE_DEFAULT
         );
+    }
 
-        return $stockMode ? 'push' : 'pull';
+    /**
+     * Get from config if non-detla changes are to be pushed.
+     *
+     * @return bool
+     *   TRUE if non-delta (nonzero/full) changes are to be pushed.
+     */
+    public function pushNonDeltaChanges()
+    {
+        $path = 'webapi/acquia_commerce_settings/push_stock_non_delta';
+
+        return (bool) $this->scopeConfig->getValue(
+            $path,
+            ScopeConfigInterface::SCOPE_TYPE_DEFAULT
+        );
     }
 
 }

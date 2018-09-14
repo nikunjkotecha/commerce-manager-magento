@@ -96,7 +96,7 @@ class Stock
         $websiteIds
     ) {
         // Don't do anything if we are not pushing stock changes.
-        if ($this->stockHelper->getStockMode() !== 'push') {
+        if (!($this->stockHelper->pushDeltaChanges())) {
             return [$batch, $websiteIds];
         }
 
@@ -158,15 +158,21 @@ class Stock
      * @param $stockId
      */
     public function aroundApplyIndexTableToStockTable(StockUpdateIdx $idx, callable $original, $stockId) {
+        // Don't do anything if we are not pushing non-delta stock changes.
+        if (!($this->stockHelper->pushNonDeltaChanges())) {
+            $original($stockId);
+            return;
+        }
+
         $this->logger->info('Inside afterApplyIndexTableToStockTable', ['stock_id' => $stockId]);
 
         // Load all products data with stock.
         $select = $this->connection->select()->from(
             $this->resource->getTableName('cataloginventory_stock_item'),
-            ['product_id', 'website_id', 'qty']
+            ['product_id', 'qty']
         );
 
-        $select->where('stock_id IN (?)', $stockId);
+        $select->where('stock_id = ?', $stockId);
 
         $productsExisting = $this->connection->fetchAll($select);
 
@@ -184,7 +190,7 @@ class Stock
             ['product_id', 'website_id', 'qty']
         );
 
-        $select->where('stock_id IN (?)', $stockId);
+        $select->where('stock_id = ?', $stockId);
 
         $products = $this->connection->fetchAll($select);
 

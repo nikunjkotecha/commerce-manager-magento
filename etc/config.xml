@@ -24,6 +24,8 @@
                 <push_stock>false</push_stock>
                 <push_stock_non_delta>false</push_stock_non_delta>
                 <push_on_attribute_update>false</push_on_attribute_update>
+                <product_push_reduce_duplicates>true</product_push_reduce_duplicates>
+                <product_push_queue_lock_expire_time>3600</product_push_queue_lock_expire_time>
             </acquia_commerce_settings>
             <acquia_commerce_security>
                 <ac_hmac_id></ac_hmac_id>

@@ -74,6 +74,14 @@
                     <comment>Push whole product when an attribute is updated</comment>
                     <source_model>Magento\Config\Model\Config\Source\Yesno</source_model>
                 </field>
+                <field id="product_push_reduce_duplicates" translate="label" type="text" sortOrder="30" showInDefault="1" showInWebsite="0" showInStore="0">
+                    <label>Product Push Reduce Duplicates</label>
+                    <source_model>Magento\Config\Model\Config\Source\Yesno</source_model>
+                </field>
+                <field id="product_push_queue_lock_expire_time" translate="label" type="text" sortOrder="30" showInDefault="1" showInWebsite="0" showInStore="0">
+                    <label>Product Push Queue Lock Expire Time</label>
+                    <frontend_class>validate-number</frontend_class>
+                </field>
             </group>
         </section>
     </system>

@@ -12,6 +12,7 @@ namespace Acquia\CommerceManager\Helper;
 
 use Acquia\CommerceManager\Helper\Data as ClientHelper;
 use Acquia\CommerceManager\Helper\Acm as AcmHelper;
+use Acquia\CommerceManager\Model\Cache\Type\Acm as AcmCache;
 use Magento\Catalog\Api\Data\ProductInterface;
 use Magento\Catalog\Api\ProductRepositoryInterface;
 use Magento\Framework\App\Config\ScopeConfigInterface;
@@ -84,6 +85,13 @@ class ProductBatch extends AbstractHelper
     private $moduleList;
 
     /**
+     * ACM Cache.
+     *
+     * @var AcmCache
+     */
+    private $cache;
+
+    /**
      * ProductBatch constructor.
      *
      * @param Context $context
@@ -91,19 +99,22 @@ class ProductBatch extends AbstractHelper
      * @param Data $clientHelper
      * @param AcmHelper $acmHelper
      * @param ModuleListInterface $moduleList
+     * @param AcmCache $cache
      */
     public function __construct(
         Context $context,
         ProductRepositoryInterface $productRepository,
         ClientHelper $clientHelper,
         AcmHelper $acmHelper,
-        ModuleListInterface $moduleList
+        ModuleListInterface $moduleList,
+        AcmCache $cache
     ) {
         $this->productRepository = $productRepository;
         $this->clientHelper = $clientHelper;
         $this->acmHelper = $acmHelper;
         $this->moduleList = $moduleList;
         $this->logger = $context->getLogger();
+        $this->cache = $cache;
         parent::__construct($context);
     }
 
@@ -214,13 +225,37 @@ class ProductBatch extends AbstractHelper
     {
         $batch = is_array($batch) ? $batch : [$batch];
 
-        // MessageQueue is EE only. So do nothing if there is no queue.
-        $messageQueue = $this->getMessageQueue();
-        if($messageQueue) {
-            $this->getMessageQueue()->publish(self::PRODUCT_PUSH_CONSUMER, json_encode($batch));
-        } else {
-            // At 20180123, do nothing.
-            // Later (Malachy or Anuj): Use Magento CRON instead
+        $batch = array_filter(array_map(function($batchItem) {
+            if (!is_array($batchItem)) {
+                $batchItem = [
+                    'product_id' => $batchItem,
+                    'store_id' => NULL,
+                ];
+            }
+
+            try {
+                if ($this->isProductPushReduceDuplicatesEnabled()) {
+                    $this->markProductAsQueuedForPushing($batchItem);
+                }
+
+                return $batchItem;
+            }
+            catch (\OutOfBoundsException $e) {
+                // Do nothing, we will return NULL for this.
+            }
+
+            return NULL;
+        }, $batch));
+
+        if (!empty($batch)) {
+            // MessageQueue is EE only. So do nothing if there is no queue.
+            $messageQueue = $this->getMessageQueue();
+            if ($messageQueue) {
+                $this->getMessageQueue()->publish(self::PRODUCT_PUSH_CONSUMER, json_encode($batch));
+            } else {
+                // At 20180123, do nothing.
+                // Later (Malachy or Anuj): Use Magento CRON instead
+            }
         }
     }
 
@@ -256,6 +291,98 @@ class ProductBatch extends AbstractHelper
             $path,
             ScopeConfigInterface::SCOPE_TYPE_DEFAULT
         );
+    }
+
+    /**
+     * Check if we need to reduce duplicates for products pushed via queue.
+     *
+     * @return bool
+     */
+    public function isProductPushReduceDuplicatesEnabled()
+    {
+        $path = 'webapi/acquia_commerce_settings/product_push_reduce_duplicates';
+
+        return (bool) $this->scopeConfig->getValue(
+            $path,
+            ScopeConfigInterface::SCOPE_TYPE_DEFAULT
+        );
+    }
+
+    /**
+     * Get product_push_queue_lock_expire_time config value.
+     *
+     * @return int
+     */
+    public function getProductPushQueueLockExpireTime()
+    {
+        $path = 'webapi/acquia_commerce_settings/product_push_queue_lock_expire_time';
+
+        return (int) $this->scopeConfig->getValue(
+            $path,
+            ScopeConfigInterface::SCOPE_TYPE_DEFAULT
+        );
+    }
+
+    /**
+     * Mark product as queued for pushing, add cache entry.
+     *
+     * @param array $batchItem
+     *   [product_id, store_id] or [sku, store_id]
+     *
+     * @throws \Exception
+     *   When product is already queued.
+     */
+    public function markProductAsQueuedForPushing(array $batchItem)
+    {
+        // First check if product is queued for all stores.
+        $allStoresCheck = $batchItem;
+        $allStoresCheck['store_id'] = null;
+        $allStoresCheckCacheId = $this->getProductPushBatchCacheId($allStoresCheck);
+        $data = $this->cache->load($allStoresCheckCacheId);
+        if (!empty($data)) {
+            throw new \OutOfBoundsException('Item already in queue.');
+        }
+
+        $cacheId = $this->getProductPushBatchCacheId($batchItem);
+        // Check again if there is store_id in request.
+        if (!empty($batchItem['store_id'])) {
+            $data = $this->cache->load($cacheId);
+            if (!empty($data)) {
+                throw new \OutOfBoundsException('Item already in queue.');
+            }
+        }
+
+        $this->cache->save($cacheId, $cacheId, [], $this->getProductPushQueueLockExpireTime());
+    }
+
+    /**
+     * Set product as pushed, remove cache entry.
+     *
+     * @param array $batchItem
+     *   [product_id, store_id] or [sku, store_id]
+     */
+    public function setProductAsPushedFromQueue(array $batchItem)
+    {
+        $cacheId = $this->getProductPushBatchCacheId($batchItem);
+        $this->cache->remove($cacheId);
+    }
+
+    /**
+     * Get product push batch item cache id.
+     *
+     * @param array $batchItem
+     *   [product_id, store_id] or [sku, store_id]
+     *
+     * @return string
+     *   Cache ID for batch item.
+     */
+    private function getProductPushBatchCacheId(array $batchItem): string
+    {
+        $cache_id = 'acm:';
+        $cache_id .= implode('|', array_keys($batchItem)) . ':';
+        $cache_id .= implode('|', $batchItem);
+
+        return $cache_id;
     }
 
 }

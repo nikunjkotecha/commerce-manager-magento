@@ -132,6 +132,12 @@ class StockPush
 
             $this->logger->debug('Pushing stock for product.', $stock);
 
+            // For some reason we get different data types on Magento Cloud
+            // prod and non-prod envs. We cast data here to ensure we get
+            // it consistently. We keep it in original format for logs though.
+            $stock['qty'] = (float) $stock['qty'];
+            $stock['product_id'] = (int) $stock['product_id'];
+
             $this->stockHelper->pushStock($stock, $stock['store_id']);
         }
     }

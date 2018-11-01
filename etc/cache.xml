@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+
+<!--
+/**
+ * Acquia/CommerceManager/etc/cache.xml
+ *
+ * Acquia Commerce Manager Integration Configuration Values for Cache.
+ *
+ * All rights reserved. No unauthorized distribution or reproduction.
+ */
+-->
+
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="urn:magento:framework:Cache/etc/cache.xsd">
+    <type name="acm" translate="label,description" instance="Acquia\CommerceManager\Model\Cache\Type\Acm">
+        <label>ACM specific cache</label>
+        <description>ACM specific cache to store locks</description>
+    </type>
+</config>

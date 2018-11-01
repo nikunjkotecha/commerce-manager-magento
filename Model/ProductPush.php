@@ -81,19 +81,33 @@ class ProductPush
         $logData['start_time'] = microtime();
 
         foreach ($products as $row) {
-            if (is_array($row)) {
+            $productId = $sku = null;
+
+            if (isset($row['product_id'])) {
                 $productId = $row['product_id'];
                 $storeIdRequested = $row['store_id'] ? $row['store_id'] : null;
             }
-            // Backward compatibility. We need to update this everywhere
-            // to push only for specific stores wherever possible.
+            elseif (isset($row['sku'])) {
+                $sku = $row['sku'];
+                $storeIdRequested = $row['store_id'] ? $row['store_id'] : null;
+            }
             else {
-                $productId = $row;
-                $storeIdRequested = null;
+                // Something wrong with data.
+                continue;
             }
 
+            $this->batchHelper->setProductAsPushedFromQueue($row);
+
             // Force reload, we always want to send fresh data.
-            $product = $this->productRepository->getById($productId, false, $storeIdRequested, true);
+            /** @var \Magento\Catalog\Api\Data\ProductInterface $product */
+            $product = isset($productId)
+                ? $this->productRepository->getById($productId, false, $storeIdRequested, true)
+                : $this->productRepository->get($sku, false, $storeIdRequested, true);
+
+            // Sanity check.
+            if (empty($product)) {
+                continue;
+            }
 
             // Do for only specific store if loaded product doesn't belong to default store.
             $stores = empty($storeIdRequested) ? $product->getStoreIds() : [$storeIdRequested];

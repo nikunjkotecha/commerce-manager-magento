@@ -13,7 +13,6 @@ namespace Acquia\CommerceManager\Observer;
 use Acquia\CommerceManager\Helper\Data as ClientHelper;
 use Acquia\CommerceManager\Helper\Acm as AcmHelper;
 use Acquia\CommerceManager\Helper\ProductBatch as BatchHelper;
-use Magento\Catalog\Api\ProductRepositoryInterface;
 use Magento\Framework\Event\ObserverInterface;
 use Magento\Framework\Event\Observer;
 use Magento\Framework\Webapi\ServiceOutputProcessor;
@@ -27,12 +26,6 @@ use Psr\Log\LoggerInterface;
  */
 class ProductImportBunchSaveObserver extends ConnectorObserver implements ObserverInterface
 {
-    /**
-     * Magento Product Repository
-     *
-     * @var ProductRepositoryInterface
-     */
-    protected $productRepository;
 
     /**
      * BatchHelper class object.
@@ -47,7 +40,6 @@ class ProductImportBunchSaveObserver extends ConnectorObserver implements Observ
      * @param AcmHelper $acmHelper
      * @param ServiceOutputProcessor $outputProc
      * @param LoggerInterface $logger
-     * @param ProductRepositoryInterface $productRepository
      * @param BatchHelper $productBatchHelper
      * @param ClientHelper $clientHelper
      */
@@ -55,11 +47,9 @@ class ProductImportBunchSaveObserver extends ConnectorObserver implements Observ
         AcmHelper $acmHelper,
         ServiceOutputProcessor $outputProc,
         LoggerInterface $logger,
-        ProductRepositoryInterface $productRepository,
         BatchHelper $productBatchHelper,
         ClientHelper $clientHelper
     ) {
-        $this->productRepository = $productRepository;
         $this->productBatchHelper = $productBatchHelper;
         parent::__construct(
             $acmHelper,
@@ -81,68 +71,60 @@ class ProductImportBunchSaveObserver extends ConnectorObserver implements Observ
     {
         // EE only. Later please remove this conditional
         // after you have coded a CE equivalent using Magento CRON
-        if($this->productBatchHelper->getMessageQueueEnabled())
-        {
-            $batchSize = $this->productBatchHelper->getProductPushBatchSize();
+        if(!$this->productBatchHelper->getMessageQueueEnabled()) {
+            $this->logger->warning('ProductImportBunchSaveObserver: Not EE. No message queue available. Imported products have not been batch-sent to Commerce Connector.');
+            return;
+        }
 
-            $batch = [];
+        $batchSize = (int) $this->acmHelper->getProductPushBatchSize();
 
-            // Get bunch products.
-            if ($products = $observer->getEvent()->getBunch()) {
-                foreach ($products as $productRow) {
-                    $sku = $productRow[ImportProduct::COL_SKU];
+        $batch = [];
 
-                    // Process only if there is SKU available in imported data.
-                    if (empty($sku)) {
-                        continue;
-                    }
+        // Get bunch products.
+        if ($products = $observer->getEvent()->getBunch()) {
+            $logData = [];
 
-                    /** @var \Magento\Catalog\Api\Data\ProductInterface $product */
-                    //NEEDS TRY CATCH
-                    //Actually, you are running a product load then only storing the ID
-                    //you could skip this, because the productPush tests for existence
-                    //and instead store SKU in batch instead of ID (because here you really only have SKU)
-                    $product = $this->productRepository->get($sku);
+            foreach ($products as $productRow) {
+                $sku = $productRow[ImportProduct::COL_SKU];
 
-                    // Sanity check.
-                    if (empty($product)) {
-                        $this->logger->warning('ProductImportBunchSaveObserver: No product found, skipping.', [
-                            'sku' => $sku,
-                        ]);
-
-                        continue;
-                    }
-
-                    $batch[] = $product->getId();
-
-                    $this->logger->info('ProductImportBunchSaveObserver: Added product to queue for pushing.', [
-                        'sku' => $sku,
-                        'product_id' => $product->getId(),
-                    ]);
-
-                    // Push product ids in queue in batch.
-                    // @TODO: Add website/store scope checks. See below mentioned
-                    // class for example.
-                    // Magento\CatalogUrlRewrite\Observer\AfterImportDataObserver
-                    // Playing safe with >= instead of ==.
-                    if (count($batch) >= $batchSize) {
-                        $this->productBatchHelper->addBatchToQueue($batch);
-
-                        // Reset batch.
-                        $batch = [];
-                    }
+                // Process only if there is SKU available in imported data.
+                if (empty($sku)) {
+                    continue;
                 }
 
-                // Push product ids in last batch (which might be lesser in count
-                // than batch size.
-                if (!empty($batch)) {
+                // @TODO: Implement checks for store/website values and
+                // use them if available. It is possible to import without
+                // store/website code. If available, it can reduce number
+                // of Product Pushes. See below mentioned class for example.
+                // \Magento\CatalogUrlRewrite\Observer\AfterImportDataObserver
+                // $store_code = $productRow[ImportProduct::COL_STORE_VIEW_CODE];
+                // $website_code = $productRow[ImportProduct::COL_WEBSITE];
+                $batch[$sku] = [
+                    'sku' => $sku,
+                    'store_id' => NULL,
+                ];
+
+                $logData[$sku] = $sku;
+
+                // Push product ids in queue in batch.
+                // Playing safe with >= instead of ==.
+                if (count($batch) >= $batchSize) {
                     $this->productBatchHelper->addBatchToQueue($batch);
+
+                    // Reset batch.
+                    $batch = [];
                 }
             }
-        }
-        else
-        {
-            $this->logger->warning('ProductImportBunchSaveObserver: Not EE. No message queue available. Imported products have not been batch-sent to Commerce Connector.');
+
+            // Push product ids in last batch (which might be lesser in count
+            // than batch size.
+            if (!empty($batch)) {
+                $this->productBatchHelper->addBatchToQueue($batch);
+            }
+
+            $this->logger->info('ProductImportBunchSaveObserver: Added products to queue for pushing.', [
+                'skus' => implode(',', $logData),
+            ]);
         }
     }
 }

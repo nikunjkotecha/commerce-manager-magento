@@ -13,7 +13,9 @@ namespace Acquia\CommerceManager\Observer;
 use Magento\Framework\Event\ObserverInterface;
 use Magento\Framework\Event\Observer;
 
+use Magento\Catalog\Api\Data\ProductInterface;
 use Magento\Catalog\Api\ProductRepositoryInterface;
+use Magento\Catalog\Model\Product\Attribute\Source\Status;
 
 use Acquia\CommerceManager\Helper\Acm as AcmHelper;
 use Acquia\CommerceManager\Helper\Data as ClientHelper;
@@ -126,6 +128,32 @@ class ProductSaveObserver extends ConnectorObserver implements ObserverInterface
             );
 
             if (empty($storeProduct)) {
+                continue;
+            }
+
+            // Avoid pushing disabled products when not needed.
+            $do_not_push_disabled = FALSE;
+            if (empty($product->getOrigData())) {
+                // Case of a creation.
+                $do_not_push_disabled = $storeProduct->getData(ProductInterface::STATUS) == Status::STATUS_DISABLED;
+            }
+            else {
+                // Case of an update.
+                if ($product->getStoreId() == 0) {
+                    // Case of an update on default store view.
+                    $do_not_push_disabled = $storeProduct->getData(ProductInterface::STATUS) == Status::STATUS_DISABLED && !($product->getOrigData(ProductInterface::STATUS) == Status::STATUS_ENABLED && $product->getData(ProductInterface::STATUS) == Status::STATUS_DISABLED);
+                }
+                else {
+                    // Case of an update on specific store.
+                    $do_not_push_disabled = $product->getOrigData(ProductInterface::STATUS) == Status::STATUS_DISABLED && $product->getData(ProductInterface::STATUS) == Status::STATUS_DISABLED;
+                }
+            }
+
+            if ($do_not_push_disabled) {
+                $this->logger->info('ProductSaveObserver: not pushing disabled product to ACM.', [
+                    'sku' => $storeProduct->getSku(),
+                    'store_id' => $storeId,
+                ]);
                 continue;
             }
 

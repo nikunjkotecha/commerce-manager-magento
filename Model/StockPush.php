@@ -77,68 +77,81 @@ class StockPush
      */
     public function pushStock($message)
     {
-        $data = json_decode($message, TRUE);
+        $batch = json_decode($message, TRUE);
 
-        $data['qty'] = isset($data['qty']) ? $data['qty'] : 0;
-
-        // Sanity check.
-        if (empty($data['id'])) {
-            $this->logger->warning('Invalid message for push stock queue.', [
-                'message' => $message,
-            ]);
-
-            return;
+        if (isset($batch['id'])) {
+            $batch = [$batch];
         }
 
-        if (!isset($data['website_ids'])) {
-            // We will use default scope, for which we use NULL here.
-            // So it goes inside the loop once.
-            $data['website_ids'] = [null];
-        }
-        elseif (!is_array($data['website_ids'])) {
-            $data['website_ids'] = [$data['website_ids']];
-        }
+        foreach ($batch as $data) {
+            $data['qty'] = isset($data['qty']) ? $data['qty'] : 0;
 
-        foreach ($data['website_ids'] as $websiteId) {
-            // Static cache for website <-> store mapping.
-            if (!isset($this->websitesToStoreIds[$websiteId])) {
-                $this->websitesToStoreIds[$websiteId] = $this->storeManager->getWebsite($websiteId)->getStoreIds();
-            }
-
-            // We push only for the first store in website, it is common for all stores.
-            $storeId = reset($this->websitesToStoreIds[$websiteId]);
-
-            $product = $this->productRepository->getById($data['id'], false, $storeId, true);
-
-            // Avoid fatal errors if product not found for some reason now.
-            if (empty($product)) {
+            // Sanity check.
+            if (empty($data['id'])) {
                 continue;
             }
 
-            // Don't push for disabled products.
-            if ($product->getStatus() == \Magento\Catalog\Model\Product\Attribute\Source\Status::STATUS_DISABLED) {
-                continue;
+            if (!isset($data['website_ids'])) {
+                // We will use default scope, for which we use NULL here.
+                // So it goes inside the loop once.
+                $data['website_ids'] = [null];
+            }
+            elseif (!is_array($data['website_ids'])) {
+                $data['website_ids'] = [$data['website_ids']];
             }
 
-            // Prepare stock data to be pushed.
-            $stock = [
-                'qty' => $data['qty'],
-                'is_in_stock' => (bool) $data['qty'],
-                'sku' => $product->getSku(),
-                'product_id' => $data['id'],
-                'website_id' => $websiteId,
-                'store_id' => $storeId,
-            ];
+            foreach ($data['website_ids'] as $websiteId) {
+                // Static cache for website <-> store mapping.
+                if (!isset($this->websitesToStoreIds[$websiteId])) {
+                    $this->websitesToStoreIds[$websiteId] = $this->storeManager->getWebsite($websiteId)->getStoreIds();
+                }
 
-            $this->logger->debug('Pushing stock for product.', $stock);
+                // We push only for the first store in website, it is common for all stores.
+                $storeId = reset($this->websitesToStoreIds[$websiteId]);
 
-            // For some reason we get different data types on Magento Cloud
-            // prod and non-prod envs. We cast data here to ensure we get
-            // it consistently. We keep it in original format for logs though.
-            $stock['qty'] = (float) $stock['qty'];
-            $stock['product_id'] = (int) $stock['product_id'];
+                $product = $this->productRepository->getById($data['id'], false, $storeId, true);
 
-            $this->stockHelper->pushStock($stock, $stock['store_id']);
+                // Avoid fatal errors if product not found for some reason now.
+                if (empty($product)) {
+                    continue;
+                }
+
+                // Don't push for disabled products.
+                if ($product->getStatus() == \Magento\Catalog\Model\Product\Attribute\Source\Status::STATUS_DISABLED) {
+                    continue;
+                }
+
+                // Prepare stock data to be pushed.
+                $stock = [
+                    'qty' => $data['qty'],
+                    'is_in_stock' => (bool) $data['qty'],
+                    'sku' => $product->getSku(),
+                    'product_id' => $data['id'],
+                    'website_id' => $websiteId,
+                    'store_id' => $storeId,
+                ];
+
+                // For some reason we get different data types on Magento Cloud
+                // prod and non-prod envs. We cast data here to ensure we get
+                // it consistently. We keep it in original format for logs though.
+                $stock['qty'] = (float) $stock['qty'];
+                $stock['product_id'] = (int) $stock['product_id'];
+
+                $stockBatch[$stock['store_id']][] = $stock;
+            }
+        }
+
+        $stockPushBatchSize = $this->stockHelper->stockPushBatchSize();
+
+        foreach ($stockBatch ?? [] as $store_id => $stocks) {
+            foreach (array_chunk($stocks, $stockPushBatchSize) as $storeStockBatch) {
+                $this->logger->info('Pushing stock to ACM.', [
+                    'store_id' => $store_id,
+                    'stocks' => json_encode($storeStockBatch),
+                ]);
+
+                $this->stockHelper->pushStock($storeStockBatch, $store_id);
+            }
         }
     }
 

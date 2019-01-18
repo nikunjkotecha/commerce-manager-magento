@@ -21,6 +21,8 @@
             <acquia_commerce_settings>
                 <product_push_batch_size>5</product_push_batch_size>
                 <product_queue_batch_size>100</product_queue_batch_size>
+                <stock_push_batch_size>50</stock_push_batch_size>
+                <stock_queue_batch_size>500</stock_queue_batch_size>
                 <filter_root_category>false</filter_root_category>
                 <push_stock>false</push_stock>
                 <push_stock_non_delta>false</push_stock_non_delta>

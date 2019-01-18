@@ -125,23 +125,28 @@ class Stock
     public function afterUpdateStockTable(StockUpdateIdx $idx, $result)
     {
         if (!empty($this->product_ids)) {
-            foreach ($this->product_ids as $product_id => $row) {
-                $this->logger->info('afterUpdateStockTable: Adding product to queue.', [
-                    'product_id' => $product_id,
-                ]);
+            $batchSize = $this->stockHelper->stockQueueBatchSize();
 
-                $data = [
-                    'id' => $product_id,
-                    'sku' => $row['exact_sku'],
-                    'website_ids' => $row['website_ids'],
-                    'qty' => $row['qty'],
-                ];
+            foreach (array_chunk($this->product_ids, $batchSize, true) as $chunk) {
+                $batch = [];
 
-                $message = json_encode($data);
+                foreach ($chunk as $product_id => $row) {
+                    $data = [
+                        'id' => $product_id,
+                        'sku' => $row['exact_sku'],
+                        'website_ids' => $row['website_ids'],
+                        'qty' => $row['qty'],
+                    ];
 
-                $this->stockHelper->addStockMessageToQueue($message);
+                    $batch[$product_id] = $data;
 
-                unset($this->product_ids[$product_id]);
+                    unset($this->product_ids[$product_id]);
+                }
+
+                if (!empty($batch)) {
+                    $this->logger->info('afterUpdateStockTable: Adding products to queue.', array_keys($batch));
+                    $this->stockHelper->addStockMessageToQueue($batch);
+                }
             }
         }
 
@@ -198,21 +203,30 @@ class Stock
             return;
         }
 
-        foreach ($products as $row) {
-            // Don't send if old and new quantity are same.
-            if (isset($productsExistingData[$row['product_id']]) && $productsExistingData[$row['product_id']] == $row['qty']) {
-                continue;
+        $batchSize = $this->stockHelper->stockQueueBatchSize();
+
+        foreach (array_chunk($products, $batchSize) as $chunk) {
+            $batch = [];
+
+            foreach ($chunk as $row) {
+                // Don't send if old and new quantity are same.
+                if (isset($productsExistingData[$row['product_id']]) && $productsExistingData[$row['product_id']] == $row['qty']) {
+                    continue;
+                }
+
+                $data = [
+                    'id' => $row['product_id'],
+                    'website_ids' => [$row['website_id']],
+                    'qty' => $row['qty'],
+                ];
+
+                $batch[] = $data;
             }
 
-            $data = [
-                'id' => $row['product_id'],
-                'website_ids' => [$row['website_id']],
-                'qty' => $row['qty'],
-            ];
 
-            $message = json_encode($data);
-
-            $this->stockHelper->addStockMessageToQueue($message);
+            if (!empty($batch)) {
+                $this->stockHelper->addStockMessageToQueue($batch);
+            }
         }
     }
 

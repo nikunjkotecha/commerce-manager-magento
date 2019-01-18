@@ -253,7 +253,7 @@ class Stock extends AbstractHelper
         // MessageQueue is EE only. So do nothing if there is no queue.
         $messageQueue = $this->getMessageQueue();
         if($messageQueue) {
-            $messageQueue->publish(self::STOCK_PUSH_CONSUMER, $message);
+            $messageQueue->publish(self::STOCK_PUSH_CONSUMER, json_encode($message));
         } else {
             // At 20180123, do nothing.
             // Later (Malachy or Anuj): Use Magento CRON instead
@@ -287,6 +287,36 @@ class Stock extends AbstractHelper
         $path = 'webapi/acquia_commerce_settings/push_stock_non_delta';
 
         return (bool) $this->scopeConfig->getValue(
+            $path,
+            ScopeConfigInterface::SCOPE_TYPE_DEFAULT
+        );
+    }
+
+    /**
+     * Get stock queue batch size.
+     *
+     * @return int
+     *   Batch size.
+     */
+    public function stockQueueBatchSize() {
+        $path = 'webapi/acquia_commerce_settings/stock_queue_batch_size';
+
+        return (int) $this->scopeConfig->getValue(
+            $path,
+            ScopeConfigInterface::SCOPE_TYPE_DEFAULT
+        );
+    }
+
+    /**
+     * Get stock push batch size.
+     *
+     * @return int
+     *   Batch size.
+     */
+    public function stockPushBatchSize() {
+        $path = 'webapi/acquia_commerce_settings/stock_push_batch_size';
+
+        return (int) $this->scopeConfig->getValue(
             $path,
             ScopeConfigInterface::SCOPE_TYPE_DEFAULT
         );

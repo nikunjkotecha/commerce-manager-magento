@@ -22,6 +22,7 @@ use Acquia\CommerceManager\Helper\Data as ClientHelper;
 use Acquia\CommerceManager\Helper\ProductBatch as ProductBatchHelper;
 use Magento\Framework\Webapi\ServiceOutputProcessor;
 use Magento\Store\Model\StoreManager;
+use Magento\Framework\Message\ManagerInterface as MessageManager;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -51,6 +52,12 @@ class ProductSaveObserver extends ConnectorObserver implements ObserverInterface
     private $batchHelper;
 
     /**
+     * Message manager
+     * @var MessageManager $messageManager
+     */
+    private $messageManager;
+
+    /**
      * ProductSaveObserver constructor.
      * @param StoreManager $storeManager
      * @param ProductRepositoryInterface $productRepository
@@ -59,6 +66,7 @@ class ProductSaveObserver extends ConnectorObserver implements ObserverInterface
      * @param ClientHelper $helper
      * @param ServiceOutputProcessor $outputProcessor
      * @param LoggerInterface $logger
+     * @param MessageManager $messageManager
      */
     public function __construct(
         StoreManager $storeManager,
@@ -67,11 +75,13 @@ class ProductSaveObserver extends ConnectorObserver implements ObserverInterface
         ProductBatchHelper $batchHelper,
         ClientHelper $helper,
         ServiceOutputProcessor $outputProcessor,
-        LoggerInterface $logger
+        LoggerInterface $logger,
+        MessageManager $messageManager
     ) {
         $this->storeManager = $storeManager;
         $this->productRepository = $productRepository;
         $this->batchHelper = $batchHelper;
+        $this->messageManager = $messageManager;
         parent::__construct(
             $acmHelper,
             $helper,
@@ -91,7 +101,7 @@ class ProductSaveObserver extends ConnectorObserver implements ObserverInterface
      */
     public function execute(Observer $observer)
     {
-        $output = [];
+        $batch = [];
 
         /** @var \Magento\Catalog\Model\Product $product */
         $product = $observer->getEvent()->getProduct();
@@ -157,13 +167,16 @@ class ProductSaveObserver extends ConnectorObserver implements ObserverInterface
                 continue;
             }
 
-            $this->logger->debug('ProductSaveObserver: sending product.', [
+            $this->logger->debug('ProductSaveObserver: queuing product.', [
                 'sku' => $storeProduct->getSku(),
                 'id' => $storeProduct->getId(),
                 'store_id' => $storeId,
             ]);
 
-            $output[$storeId][] = $this->acmHelper->getProductDataForAPI($storeProduct);
+            $batch[] = [
+                'sku' => $storeProduct->getSku(),
+                'store_id' => $storeId,
+            ];
         }
 
         // For the sites in which product is removed, we will send the product
@@ -199,21 +212,23 @@ class ProductSaveObserver extends ConnectorObserver implements ObserverInterface
                         continue;
                     }
 
-                    $this->logger->debug('ProductSaveObserver: Product removed from website, will send product with status disabled.', [
+                    $this->logger->debug('ProductSaveObserver: Product removed from website, queuing product to be pushed.', [
                         'sku' => $storeProduct->getSku(),
                         'id' => $storeProduct->getId(),
                         'store_id' => $storeId,
                     ]);
 
-                    $record = $this->acmHelper->getProductDataForAPI($storeProduct);
-                    $record['status'] = \Magento\Catalog\Model\Product\Attribute\Source\Status::STATUS_DISABLED;
-                    $output[$storeId][] = $record;
+                    $batch[] = [
+                      'sku' => $storeProduct->getSku(),
+                      'store_id' => $storeId,
+                    ];
                 }
             }
         }
 
-        if ($output) {
-            $this->batchHelper->pushMultipleProducts($output, 'productSave');
+        if ($batch) {
+            $this->batchHelper->addBatchToQueue($batch);
+            $this->messageManager->addNotice(__('Your product update has been pushed to ProductPush queue of Magento. Once processed it is going to be pushed to ACM for every impacted stores and queued there.'));
         }
     }
 

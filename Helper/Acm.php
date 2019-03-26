@@ -426,4 +426,54 @@ class Acm extends AbstractHelper
         return $statuses;
     }
 
+    /**
+     * assignProperSkus.
+     *
+     * Assign proper SKUs to each row in batch. For configurable products we
+     * usually get two entries for both parent and child products but with same
+     * (child) SKUs in both. This blocks our flow as we rely heavily on SKUs.
+     *
+     * @param array $batch
+     *
+     * @return array
+     */
+    public function replaceProductIdWithSku($products)
+    {
+        $productIds = array_column($products, 'product_id');
+
+        if (empty($productIds)) {
+            return $products;
+        }
+
+        $select = $this->resource->getConnection()->select()->from(
+            $this->resource->getTableName('catalog_product_entity'),
+            ['entity_id', 'sku']
+        );
+        $select->where('entity_id IN (?)', $productIds);
+        $records = $this->resource->getConnection()->fetchPairs($select);
+
+        foreach ($products as $key => $row) {
+            // We may have mixed data, some with product id, some with sku.
+            if (empty($row['product_id'])) {
+                continue;
+            }
+
+            // For whatever reason if we are not able to find record
+            // for this product id in DB, we don't do anything
+            // for it.
+            if (empty($records[$row['product_id']])) {
+                unset($products[$key]);
+                continue;
+            }
+
+            // Set sku in product data.
+            $products[$key]['sku'] = $records[$row['product_id']];
+
+            // Remove product id now.
+            unset($products[$key]['product_id']);
+        }
+
+        return $products;
+    }
+
 }

@@ -89,12 +89,13 @@ class ProductImportBunchSaveObserver extends ConnectorObserver implements Observ
         }
 
         $products = $observer->getEvent()->getBunch();
-        if (empty($products) || empty($products[0])) {
+        if (empty($products)) {
             $this->logger->warning('ProductImportBunchSaveObserver: Invoked with empty products data in observer event.');
             return;
         }
 
-        if (!isset($products[0][ImportProduct::COL_SKU])) {
+        $first_product = reset($products);
+        if (!isset($first_product[ImportProduct::COL_SKU])) {
             $this->logger->warning('ProductImportBunchSaveObserver: Invoked with products data without sku in data, ignoring.');
             return;
         }
@@ -105,7 +106,7 @@ class ProductImportBunchSaveObserver extends ConnectorObserver implements Observ
 
         // When status column is set, we push to all stores of particular website if store/website set.
         // If store/website is not set, we will simply push to all the stores (even if disabled).
-        $status_column_set = isset($products[0]['status']);
+        $status_column_set = isset($first_product['status']);
 
         $batch = [];
         $logData = [];

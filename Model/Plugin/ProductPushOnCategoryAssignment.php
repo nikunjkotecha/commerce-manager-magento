@@ -24,13 +24,6 @@ class ProductPushOnCategoryAssignment
     private $batchHelper;
 
     /**
-     * System Logger
-     *
-     * @var LoggerInterface $logger
-     */
-    protected $logger;
-
-    /**
      * Message manager
      * @var MessageManager
      */
@@ -40,16 +33,13 @@ class ProductPushOnCategoryAssignment
      * Constructor
      *
      * @param BatchHelper $batchHelper
-     * @param LoggerInterface $logger
      * @param MessageManager $messageManager
      */
     public function __construct(
         BatchHelper $batchHelper,
-        LoggerInterface $logger,
         MessageManager $messageManager
     ) {
         $this->batchHelper = $batchHelper;
-        $this->logger = $logger;
         $this->messageManager = $messageManager;
     }
 
@@ -76,29 +66,17 @@ class ProductPushOnCategoryAssignment
         if ($productIds) {
             $productIds = array_unique($productIds);
 
-            // Get batch size from config.
-            $batchSize = $this->batchHelper->getProductQueueBatchSize();
+            $productsToQueue = [];
+            foreach ($productIds as $productId) {
+                $productsToQueue[$productId] = [
+                    'product_id' => $productId,
+                    'stores' => null,
+                ];
+            }
 
-            // Do product push in batches.
-            foreach (array_chunk($productIds, $batchSize, TRUE) as $chunk) {
-                $batch = [];
-
-                foreach ($chunk as $productId) {
-                    $batch[$productId] = [
-                        'product_id' => $productId,
-                        'store_id' => null,
-                    ];
-                }
-
-                if (!empty($batch)) {
-                    // Push product ids in queue in batch.
-                    $this->batchHelper->addBatchToQueue($batch);
-
-                    $this->logger->info('Added products to queue for pushing in background.', [
-                        'observer' => 'afterProductAssignmentToCategoryUpdated',
-                        'batch' => $batch,
-                    ]);
-                }
+            // Queue products to be pushed in background.
+            if (!empty($productsToQueue)) {
+                $this->batchHelper->addProductsToQueue($productsToQueue, __CLASS__ . ':' . __FUNCTION__);
             }
 
             if (!$this->batchHelper->getMessageQueueEnabled()) {

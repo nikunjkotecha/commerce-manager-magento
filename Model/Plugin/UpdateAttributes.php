@@ -87,7 +87,7 @@ class UpdateAttributes
 
         if ($this->batchHelper->pushOnProductAttributeUpdate()) {
             // Push to all stores by default.
-            $storeIds = [NULL];
+            $storeIds = [0];
 
             // If not the default store view.
             if ($storeId != 0) {
@@ -114,37 +114,21 @@ class UpdateAttributes
 
             $productIds = array_unique($productIds);
 
-            // Get batch size from config.
-            $batchSize = $this->batchHelper->getProductQueueBatchSize();
+            $productsToQueue = [];
+            foreach ($productIds as $productId) {
+                $productsToQueue[] = [
+                    'product_id' => $productId,
+                    'stores' => $storeIds,
+                ];
+            }
 
-            // Do product push in batches.
-            foreach (array_chunk($productIds, $batchSize, TRUE) as $chunk) {
-                $batch = [];
-
-                foreach ($chunk as $productId) {
-                    // Send to multiple stores.
-                    foreach ($storeIds as $store_id) {
-                        $batch[$store_id][] = [
-                            'product_id' => $productId,
-                            'store_id' => $store_id,
-                        ];
-                    }
-                }
-
-                if (!empty($batch)) {
-                    // Push product ids in queue in batch.
-                    foreach ($batch as $storeBatch) {
-                        $this->batchHelper->addbatchtoqueue($storeBatch);
-
-                        $this->logger->info('Added products to queue for pushing in background.', [
-                            'observer' => 'aroundUpdateAttributes',
-                            'batch' => $storeBatch,
-                        ]);
-                    }
-                }
+            // Queue products to be pushed in background.
+            if (!empty($productsToQueue)) {
+                $this->batchHelper->addProductsToQueue($productsToQueue, __CLASS__ . ':' . __FUNCTION__);
             }
         }
 
         return $result;
     }
+
 }

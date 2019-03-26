@@ -32,6 +32,14 @@ use Psr\Log\LoggerInterface;
  */
 class ProductSaveObserver extends ConnectorObserver implements ObserverInterface
 {
+   /**
+    * SKU data that needs to be pushed to the queue later in the process, once
+    * product save transaction is committed.
+    *
+    * @var array
+    *   SKU data that to be push to queue.
+    */
+    public static $dataToPush = [];
 
     /**
      * Magento Product Repository
@@ -88,12 +96,14 @@ class ProductSaveObserver extends ConnectorObserver implements ObserverInterface
             $outputProcessor,
             $logger
         );
+
+        register_shutdown_function([$this, 'pushToQueue']);
     }
 
     /**
      * execute
      *
-     * Send updated product data to Acquia Commerce Manager.
+     * Send updated product data to Acquia Conductor.
      *
      * @param Observer $observer Incoming Observer
      *
@@ -101,12 +111,12 @@ class ProductSaveObserver extends ConnectorObserver implements ObserverInterface
      */
     public function execute(Observer $observer)
     {
-        $batch = [];
+        $storeIds = [];
 
         /** @var \Magento\Catalog\Model\Product $product */
         $product = $observer->getEvent()->getProduct();
 
-        $this->logger->debug('ProductSaveObserver: saved product.', [
+        $this->logger->info('ProductSaveObserver: saved product.', [
             'sku' => $product->getSku(),
             'id' => $product->getId(),
             'store_id' => $product->getStoreId(),
@@ -121,16 +131,19 @@ class ProductSaveObserver extends ConnectorObserver implements ObserverInterface
         // In case of specific store update there may be larger scope
         // fields updated.
         if ($product->getStoreId() != 0 && !empty($product->getOrigData())) {
-            $attr_changed = NULL;
+            $attr_changed = null;
+            $categoryIdsOrig = $product->getOrigData('category_ids') ?? [];
+            $categoryIdsNew = $product->getData('category_ids') ?? [];
+
             // Push to all stores on category change.
-            if (
-              !empty(array_diff($product->getData('category_ids'), $product->getOrigData('category_ids')))
-              || !empty(array_diff($product->getOrigData('category_ids'), $product->getData('category_ids')))
-            ) {
+            if (count($categoryIdsNew) != count($categoryIdsOrig) || !empty(array_diff($categoryIdsNew, $categoryIdsOrig))) {
                 $stores = $product->getStoreIds();
                 $attr_changed = 'category';
             }
-            elseif ($product->getData('status') != $product->getOrigData('status')) {
+            // Push to all stores of website if we are enabling the product
+            // so all translations are created.
+            elseif ($product->getData('status') != $product->getOrigData('status')
+                && $product->getData('status') == Status::STATUS_ENABLED) {
                 // Push to all stores of the website on status change.
                 $stores = $this->storeManager->getStore($product->getStoreId())->getWebsite()->getStoreIds();
                 $attr_changed = 'status';
@@ -196,16 +209,7 @@ class ProductSaveObserver extends ConnectorObserver implements ObserverInterface
                 continue;
             }
 
-            $this->logger->debug('ProductSaveObserver: queuing product.', [
-                'sku' => $storeProduct->getSku(),
-                'id' => $storeProduct->getId(),
-                'store_id' => $storeId,
-            ]);
-
-            $batch[] = [
-                'sku' => $storeProduct->getSku(),
-                'store_id' => $storeId,
-            ];
+            $storeIds[] = $storeId;
         }
 
         // For the sites in which product is removed, we will send the product
@@ -219,7 +223,7 @@ class ProductSaveObserver extends ConnectorObserver implements ObserverInterface
             : [];
 
         if ($websitesIdsRemoved) {
-            $this->logger->debug('ProductSaveObserver: product removed from websites.', [
+            $this->logger->info('ProductSaveObserver: product removed from websites.', [
                 'sku' => $product->getSku(),
                 'id' => $product->getId(),
                 'website_ids_removed' => $websitesIdsRemoved,
@@ -241,23 +245,44 @@ class ProductSaveObserver extends ConnectorObserver implements ObserverInterface
                         continue;
                     }
 
-                    $this->logger->debug('ProductSaveObserver: Product removed from website, queuing product to be pushed.', [
+                    $this->logger->info('ProductSaveObserver: Product removed from website, queuing product to be pushed.', [
                         'sku' => $storeProduct->getSku(),
                         'id' => $storeProduct->getId(),
                         'store_id' => $storeId,
                     ]);
 
-                    $batch[] = [
-                      'sku' => $storeProduct->getSku(),
-                      'store_id' => $storeId,
-                    ];
+                    $storeIds[] = $storeId;
                 }
             }
         }
 
-        if ($batch) {
-            $this->batchHelper->addBatchToQueue($batch);
+        if ($storeIds) {
+            self::$dataToPush[] = [
+              'sku' => $product->getSku(),
+              'stores' => $storeIds,
+            ];
             $this->messageManager->addNotice(__('Your product update has been pushed to ProductPush queue of Magento. Once processed it is going to be pushed to ACM for every impacted stores and queued there.'));
+        }
+    }
+
+    /**
+     * ShutDown function.
+     *
+     * This shutdown function is used to push product data to the queue later in
+     * the PHP process to avoid pushing stale/obsolete data. This is happening
+     * because the product save is done in a database transaction that is not yet
+     * committed at the time of the observer.
+     */
+    public function pushToQueue()
+    {
+        if (!empty(self::$dataToPush)) {
+            foreach (self::$dataToPush as $data) {
+                $this->batchHelper->addProductsToQueue([$data], __CLASS__ . ':' . __FUNCTION__, false);
+                $this->logger->info('Data pushed to queue.', [
+                    'sku' => $data['sku'],
+                    'stores' => implode(',', $data['stores']),
+                ]);
+            }
         }
     }
 

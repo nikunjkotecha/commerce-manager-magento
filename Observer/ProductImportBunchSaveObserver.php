@@ -100,16 +100,13 @@ class ProductImportBunchSaveObserver extends ConnectorObserver implements Observ
             return;
         }
 
-        $skus = array_column($products, ImportProduct::COL_SKU);
         $store_ids = $this->acmHelper->getAllActiveStoreIds();
-        $statuses = $this->acmHelper->getProductStatusForStores($skus, $store_ids);
 
         // When status column is set, we push to all stores of particular website if store/website set.
         // If store/website is not set, we will simply push to all the stores (even if disabled).
         $status_column_set = isset($first_product['status']);
 
-        $batch = [];
-        $logData = [];
+        $productsToQueue = [];
         foreach ($products as $productRow) {
             $sku = $productRow[ImportProduct::COL_SKU];
             $productStoresToPush = [];
@@ -119,8 +116,9 @@ class ProductImportBunchSaveObserver extends ConnectorObserver implements Observ
             if (isset($productRow[ImportProduct::COL_STORE_VIEW_CODE])) {
                 $store_code = $productRow[ImportProduct::COL_STORE_VIEW_CODE];
 
-                // Push to all stores of a site when updating status.
-                if ($status_column_set) {
+                // Push to all stores of website if we are enabling the product
+                // so all translations are created.
+                if ($status_column_set && $productRow['status'] == Status::STATUS_ENABLED) {
                     $productStoresToPush = $this->acmHelper->getAllStoresInWebsiteForStore($store_code);
                 }
                 else {
@@ -143,47 +141,28 @@ class ProductImportBunchSaveObserver extends ConnectorObserver implements Observ
                 }
             }
 
-            // Remove disabled stores if status column not set.
-            if (!$status_column_set) {
-                foreach ($productStoresToPush as $index => $storeId) {
-                    if ($statuses[$sku][$storeId] == Status::STATUS_DISABLED) {
-                        unset($productStoresToPush[$index]);
-                    }
-                }
-            }
-
             // Skip the products completely that are not enabled in any stores.
             if (empty($productStoresToPush)) {
                 continue;
             }
 
-            foreach ($productStoresToPush as $storeId) {
-                $batch[$storeId][$sku] = [
+            if (isset($productsToQueue[$sku])) {
+                $productsToQueue[$sku]['stores'] = array_merge($productsToQueue[$sku]['stores'], $productStoresToPush);
+            }
+            else {
+                $productsToQueue[$sku] = [
                     'sku' => $sku,
-                    'store_id' => $storeId,
+                    'stores' => $productStoresToPush,
                 ];
             }
-
-            $logData[$sku] = $sku . ' (Store ids: ' . implode(',', $productStoresToPush) . ')';
         }
 
         // Simply return if nothing to queue.
-        if (empty($batch)) {
+        if (empty($productsToQueue)) {
             return;
         }
 
-        $batchSize = $this->productBatchHelper->getProductQueueBatchSize();
-
-        // Add batch to queue, create chunks per store id based on batch size.
-        foreach ($batch as $storeBatch) {
-            foreach (array_chunk($storeBatch, $batchSize, true) as $chunk) {
-                $this->productBatchHelper->addBatchToQueue($chunk);
-            }
-        }
-
-        $this->logger->info('ProductImportBunchSaveObserver: Added products to queue for pushing.', [
-            'skus' => implode(', ', $logData),
-        ]);
+        $this->productBatchHelper->addProductsToQueue($productsToQueue, __CLASS__ . ':' . __FUNCTION__, !$status_column_set);
 
         if (!$this->productBatchHelper->getMessageQueueEnabled()) {
             $this->messageManager->addNotice(__('Your product assignments have been pushed to ACM for every impacted stores and are going to be queued there.'));
@@ -192,4 +171,5 @@ class ProductImportBunchSaveObserver extends ConnectorObserver implements Observ
             $this->messageManager->addNotice(__('Your product assignments have been pushed to ProductPush queue of Magento. Once processed they are going to be pushed to ACM for every impacted stores and queued there.'));
         }
     }
+
 }

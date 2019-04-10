@@ -2,6 +2,7 @@
 
 namespace Acquia\CommerceManager\Setup;
 
+use Magento\Framework\Indexer\IndexerRegistry;
 use Magento\Framework\Setup\UpgradeDataInterface;
 use Magento\Framework\Setup\ModuleContextInterface;
 use Magento\Framework\Setup\ModuleDataSetupInterface;
@@ -18,6 +19,11 @@ class UpgradeData implements UpgradeDataInterface
     private $logger;
 
     /**
+     * @var IndexerRegistry
+     */
+    private $indexerRegistry;
+
+    /**
      * @var \Magento\Integration\Api\IntegrationServiceInterface
      */
     private $integrationService;
@@ -29,9 +35,11 @@ class UpgradeData implements UpgradeDataInterface
      */
     public function __construct(
         \Magento\Integration\Api\IntegrationServiceInterface $integrationService,
+        IndexerRegistry $indexerRegistry,
         \Psr\Log\LoggerInterface $logger //log injection
     ) {
         $this->integrationService = $integrationService;
+        $this->indexerRegistry = $indexerRegistry;
         $this->logger = $logger;
     }
 
@@ -71,8 +79,8 @@ class UpgradeData implements UpgradeDataInterface
         }
 
         if (version_compare($context->getVersion(), '1.1.3') < 0) {
-            //code to upgrade to 1.1.3
-            $this->logger->info("Upgraded to 1.1.3");
+            $this->indexerRegistry->get('acq_salesrule_product')->reindexAll();
+            $this->logger->info('ACM data upgraded to 1.1.3, Sales Rule indexer data re-indexed.');
         }
 
         $setup->endSetup();

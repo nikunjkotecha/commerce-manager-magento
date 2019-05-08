@@ -14,8 +14,8 @@ or frequency setup should be tweaked based on performance of server and idle tim
   ``` 
   */2 * * * * timeout 119s php bin/magento queue:consumers:start --max-messages=100 connectorProductPushConsumer
   ```
-3. (Magento EE only) Setup cron job to consume messages for pushing stock changes.
-  Cron job example: `*/5 * * * * timeout 290s php bin/magento queue:consumers:start --max-messages=100 connectorStockPushConsumer`
+3. Ensure cron job for indexer is configured and running fine.
+  Command: `php bin/magento cron:run --group="index"`
 
 
 ## Enable connector integration
